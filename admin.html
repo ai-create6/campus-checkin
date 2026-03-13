@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>管理端 · 打卡记录</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui}
+body{background:#f5f7fa;padding:12px;max-width:600px;margin:0 auto}
+.card{background:white;border-radius:16px;padding:16px;margin-bottom:16px;box-shadow:0 2px 8px #0000000a}
+.title{font-size:18px;font-weight:600;text-align:center;margin-bottom:16px;color:#1e293b}
+.input-row{display:flex;align-items:center;margin-bottom:12px}
+.input-label{width:70px;font-size:16px;color:#1e293b;flex-shrink:0}
+.input-row input{flex:1;padding:12px;border:1px solid #cbd5e1;border-radius:10px;font-size:16px;width:auto;margin-bottom:0}
+.input-row .password-container{flex:1;display:flex;align-items:center;border:1px solid #cbd5e1;border-radius:10px;background:white}
+.input-row .password-container input{flex:1;border:none;outline:none;padding:12px;margin:0;background:transparent}
+.input-row .password-container button{width:44px;height:44px;background:transparent;border:none;color:#64748b;cursor:pointer;padding:0;margin:0;display:flex;align-items:center;justify-content:center}
+button{width:100%;padding:12px;background:#2563eb;color:white;border:none;border-radius:10px;font-size:16px;font-weight:500;margin-bottom:8px;touch-action:manipulation}
+button.gray{background:#475569}
+button.red{background:#dc2626}
+.record-item{background:#f8fafc;border-radius:12px;padding:12px 40px 12px 12px;margin-bottom:10px;border:1px solid #e2e8f0;position:relative}
+.record-item img{width:100%;max-height:150px;border-radius:6px;margin:8px 0;object-fit:cover}
+.badge{display:inline-block;padding:4px 8px;border-radius:16px;font-size:13px;font-weight:500}
+.badge.green{background:#dcfce7;color:#166534}
+.badge.red{background:#fee2e2;color:#991b1b}
+.refresh-btn{margin-bottom:16px}
+.error{color:#dc2626;text-align:center;margin:8px 0}
+.date-row{display:flex;gap:8px;margin-bottom:12px}
+.date-row input{flex:1;margin-bottom:0}
+.loading{text-align:center;padding:20px;color:#666;}
+.delete-btn{position:absolute;top:8px;right:8px;width:30px;height:30px;background:#ef4444;color:white;border:none;border-radius:50%;font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;z-index:1}
+.delete-btn:hover{background:#dc2626}
+</style>
+</head>
+<body>
+
+<div id="loading" class="loading">⏳ 页面加载中...</div>
+
+<!-- 登录卡片 -->
+<div class="card" id="login-card" style="display:none;">
+  <div class="title">🔐 管理端登录</div>
+  <div class="input-row">
+    <span class="input-label">账号：</span>
+    <input type="text" id="username" placeholder="请输入账号">
+  </div>
+  <div class="input-row">
+    <span class="input-label">密码：</span>
+    <div class="password-container">
+      <input type="password" id="password" placeholder="请输入密码">
+      <button type="button" onclick="togglePassword('password', this)" id="pwdToggleBtn">
+        <!-- 默认隐藏状态（闭眼图标） -->
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+      </button>
+    </div>
+  </div>
+  <button onclick="login()">登录</button>
+  <div id="login-error" class="error"></div>
+  <button class="gray" onclick="window.location.href='checkin.html'">⬅ 返回打卡端</button>
+</div>
+
+<!-- 记录卡片 -->
+<div class="card" id="records-card" style="display:none;">
+  <div class="title">📋 所有打卡记录</div>
+  <button class="gray" onclick="window.location.href='checkin.html'">⬅ 返回打卡端</button>
+  <button class="refresh-btn" onclick="renderRecords()">🔄 手动刷新</button>
+
+  <div style="margin:16px 0; padding-top:12px; border-top:1px solid #e2e8f0;">
+    <div style="font-size:16px; font-weight:500; margin-bottom:12px;">🗑️ 清除记录</div>
+    <div class="date-row"><input type="date" id="startDate"><input type="date" id="endDate"></div>
+    <button class="red" onclick="confirmClearRecords()">清除选定日期内的记录</button>
+  </div>
+
+  <div id="records-list" style="margin-top:16px;"></div>
+</div>
+
+<script>
+window.onload = function() {
+  try {
+    document.getElementById('loading').style.display = 'none';
+    const isLoggedIn = sessionStorage.getItem('adminLoggedIn');
+    if (isLoggedIn === 'true') showRecordsCard(); else showLoginCard();
+  } catch (e) {
+    document.getElementById('loading').innerHTML = '❌ 页面加载出错：' + e.message;
+    console.error(e);
+  }
+};
+
+const SCHOOL_BOUNDS = { minLat:30.597, maxLat:30.615, minLng:116.987, maxLng:117.006 };
+const VALID_USERNAME = 'aqsfteacher', VALID_PASSWORD = '123456';
+
+function togglePassword(fieldId, btn) {
+  const field = document.getElementById(fieldId);
+  if (field.type === 'password') {
+    field.type = 'text';
+    // 睁眼图标（显示密码）
+    btn.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+  } else {
+    field.type = 'password';
+    // 闭眼图标（隐藏密码，带斜线）
+    btn.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+  }
+}
+
+function showLoginCard() {
+  document.getElementById('login-card').style.display = 'block';
+  document.getElementById('records-card').style.display = 'none';
+}
+function showRecordsCard() {
+  document.getElementById('login-card').style.display = 'none';
+  document.getElementById('records-card').style.display = 'block';
+  renderRecords();
+}
+function login() {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value.trim();
+  const errorEl = document.getElementById('login-error');
+  if (username === VALID_USERNAME && password === VALID_PASSWORD) {
+    sessionStorage.setItem('adminLoggedIn', 'true');
+    showRecordsCard();
+  } else errorEl.textContent = '用户名或密码错误';
+}
+function escapeHtml(text) {
+  if (text == null) return '';
+  const div = document.createElement('div');
+  div.textContent = String(text);
+  return div.innerHTML;
+}
+function deleteRecord(id) {
+  if (!confirm('确定要删除这条记录吗？此操作不可恢复。')) return;
+  try {
+    let records = JSON.parse(localStorage.getItem('checkins')) || [];
+    records = records.filter(rec => rec.id !== id);
+    localStorage.setItem('checkins', JSON.stringify(records));
+    renderRecords();
+  } catch (e) { alert('删除失败：' + e.message); }
+}
+function renderRecords() {
+  const container = document.getElementById('records-list');
+  try {
+    const records = JSON.parse(localStorage.getItem('checkins')) || [];
+    if (records.length === 0) {
+      container.innerHTML = '<p style="text-align:center;color:#64748b;">暂无打卡记录</p>';
+      return;
+    }
+    let html = '';
+    records.forEach(rec => {
+      const name = escapeHtml(rec.name || '未知');
+      const phone = escapeHtml(rec.phone || '无');
+      const number = escapeHtml(rec.number || '无');
+      const time = escapeHtml(rec.time || '未知时间');
+      const lat = typeof rec.lat === 'number' ? rec.lat.toFixed(5) : '0.00000';
+      const lng = typeof rec.lng === 'number' ? rec.lng.toFixed(5) : '0.00000';
+      const photo = rec.photo || '';
+      const inSchool = (typeof rec.lat === 'number' && typeof rec.lng === 'number') ? isInSchool(rec.lat, rec.lng) : false;
+      const badgeClass = inSchool ? 'badge green' : 'badge red';
+      const badgeText = inSchool ? '在校' : '校外';
+      html += `
+        <div class="record-item" data-id="${rec.id}">
+          <button class="delete-btn" onclick="deleteRecord(${rec.id})" title="删除">✕</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>${name}</strong> <span class="${badgeClass}">${badgeText}</span>
+          </div>
+          <div style="font-size:14px;color:#475569;margin:4px 0;">📞 电话：${phone}</div>
+          <div style="font-size:14px;color:#475569;margin:4px 0;">📚 学号：${number}</div>
+          <div style="font-size:14px;color:#475569;margin:4px 0;">🕒 时间：${time}</div>
+          <div style="font-size:14px;color:#475569;margin:4px 0;">📍 位置：${lat}, ${lng}</div>
+          ${photo ? `<img src="${photo}" alt="打卡照片" onerror="this.style.display='none'">` : '<div style="color:#999;">无照片</div>'}
+        </div>
+      `;
+    });
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = `<p style="color:red;text-align:center;">渲染记录时出错：${escapeHtml(e.message)}</p>`;
+    console.error(e);
+  }
+}
+function isInSchool(lat, lng) {
+  return lat >= SCHOOL_BOUNDS.minLat && lat <= SCHOOL_BOUNDS.maxLat &&
+         lng >= SCHOOL_BOUNDS.minLng && lng <= SCHOOL_BOUNDS.maxLng;
+}
+function confirmClearRecords() {
+  const start = document.getElementById('startDate').value, end = document.getElementById('endDate').value;
+  if (!start || !end) return alert('请选择起始日期和结束日期');
+  const startTime = new Date(start).setHours(0,0,0,0);
+  const endTime = new Date(end).setHours(23,59,59,999);
+  if (startTime > endTime) return alert('起始日期不能晚于结束日期');
+  try {
+    const records = JSON.parse(localStorage.getItem('checkins')) || [];
+    const newRecords = records.filter(rec => rec.timestamp < startTime || rec.timestamp > endTime);
+    const deleted = records.length - newRecords.length;
+    if (deleted === 0) return alert('选定日期内没有记录');
+    if (confirm(`确定要删除 ${deleted} 条记录吗？此操作不可恢复。`)) {
+      localStorage.setItem('checkins', JSON.stringify(newRecords));
+      renderRecords();
+      alert(`已删除 ${deleted} 条记录`);
+    }
+  } catch (e) { alert('清除记录时出错：' + e.message); }
+}
+window.addEventListener('storage', e => {
+  if (e.key === 'checkins' && sessionStorage.getItem('adminLoggedIn') === 'true') renderRecords();
+});
+</script>
+</body>
+</html>
